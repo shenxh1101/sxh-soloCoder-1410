@@ -43,6 +43,10 @@ class Boss:
         self.special_attack_timer = 0
         self.rage_mode = False
         self.shake_intensity = 0
+        self._update_counter = 0
+        self._last_fire_phase = -1
+        self._phase_lock = False
+        self._phase_lock_timer = 0
 
     def _generate_weak_points(self):
         pts = []
@@ -114,6 +118,7 @@ class Boss:
     def update(self, dt, bullets_list, enemies_list, player, wingman=None, particles=None):
         if self.dead:
             return
+        self._update_counter += 1
         self.anim_timer += dt
         self.phase_timer += dt
         self.pattern_timer += dt
@@ -122,9 +127,13 @@ class Boss:
         self.special_attack_timer -= dt
         self.weak_point_timer -= dt
         self.shake_intensity = max(0, self.shake_intensity - dt * 30)
+        if self._phase_lock_timer > 0:
+            self._phase_lock_timer -= dt
+            if self._phase_lock_timer <= 0:
+                self._phase_lock = False
 
         if self.entering:
-            self.vy = 80
+            self.vy = 70
             if self.y >= 150:
                 self.y = 150
                 self.entering = False
@@ -142,36 +151,39 @@ class Boss:
                 random.shuffle(candidates)
                 for i in candidates[:n_exposed]:
                     self.weak_point_exposed[i] = True
-            self.weak_point_timer = 3.0 + random.uniform(-1, 1)
+            self.weak_point_timer = 3.5 + random.uniform(-0.5, 0.8)
             if self.phase >= 2:
-                self.weak_point_timer *= 0.7
+                self.weak_point_timer *= 0.75
 
         if self.minion_timer <= 0 and not self.entering:
-            n = 2 + self.phase
+            n = 1 + self.phase
             for i in range(n):
-                angle = (i / n) * math.pi * 2 + random.uniform(-0.2, 0.2)
-                ex = self.x + math.cos(angle) * 120
-                ey = self.y + math.sin(angle) * 120
+                angle = (i / max(1, n)) * math.pi * 2 + random.uniform(-0.15, 0.15)
+                ex = self.x + math.cos(angle) * 130
+                ey = self.y + math.sin(angle) * 130
                 kind = ENEMY_KAMIKAZE if self.phase >= 1 else ENEMY_DRONE
-                e = Enemy(kind, ex, ey, self.difficulty * 0.8)
-                e.entering = False
-                e.target_y = random.uniform(200, SCREEN_HEIGHT * 0.6)
-                enemies_list.append(e)
-            self.minion_timer = max(4.0, 8.0 - self.phase * 2.0)
+                try:
+                    e = Enemy(kind, ex, ey, self.difficulty * 0.75)
+                    e.entering = False
+                    e.target_y = random.uniform(250, SCREEN_HEIGHT * 0.65)
+                    enemies_list.append(e)
+                except Exception:
+                    pass
+            self.minion_timer = max(5.5, 9.0 - self.phase * 1.5)
 
         self.x += self.vx * dt
         self.y += self.vy * dt
-        self.x = clamp(self.x, self.radius + 50, SCREEN_WIDTH - self.radius - 50)
-        self.y = clamp(self.y, 80, SCREEN_HEIGHT * 0.4)
+        self.x = clamp(self.x, self.radius + 40, SCREEN_WIDTH - self.radius - 40)
+        self.y = clamp(self.y, 90, int(SCREEN_HEIGHT * 0.42))
 
     def _ai_update(self, dt, bullets_list, enemies_list, player, wingman, particles):
-        base_speed = 60 + self.phase * 20
+        base_speed = 50 + self.phase * 15
         if self.attack_pattern == 0:
-            self.vx = math.sin(self.anim_timer * 0.8) * (base_speed + 40)
-            self.vy = math.cos(self.anim_timer * 0.5) * base_speed * 0.4
+            self.vx = math.sin(self.anim_timer * 0.7) * (base_speed + 25)
+            self.vy = math.cos(self.anim_timer * 0.4) * base_speed * 0.35
         elif self.attack_pattern == 1:
-            self.vx = math.sin(self.anim_timer * 1.2) * base_speed * 1.5
-            self.vy = 0
+            self.vx = math.sin(self.anim_timer * 1.0) * base_speed * 1.3
+            self.vy = math.sin(self.anim_timer * 0.6) * base_speed * 0.2
         elif self.attack_pattern == 2:
             if self.charging:
                 if self.charge_target:
@@ -179,23 +191,24 @@ class Boss:
                                           self.charge_target[0], self.charge_target[1])
                     self.vx = math.cos(angle) * self.charge_speed
                     self.vy = math.sin(angle) * self.charge_speed
-                    self.charge_speed += dt * 800
-                    if (self.y > SCREEN_HEIGHT * 0.7 or
+                    self.charge_speed = min(520, self.charge_speed + dt * 600)
+                    if (self.y > SCREEN_HEIGHT * 0.72 or
                             distance(self.x, self.y,
-                                     self.charge_target[0], self.charge_target[1]) < 30):
+                                     self.charge_target[0], self.charge_target[1]) < 40):
                         self.charging = False
                         if particles:
                             particles.explosion(self.x, self.y, count=80, size=6)
+                        self.screen_shake = 20
                 else:
                     self.charging = False
             else:
-                self.vx *= 0.95
-                self.vy *= 0.95
+                self.vx *= 0.96
+                self.vy *= 0.96
         else:
-            self.vx = math.sin(self.anim_timer * 0.3) * base_speed * 0.6
-            self.vy = math.sin(self.anim_timer * 1.5) * base_speed * 0.8
+            self.vx = math.sin(self.anim_timer * 0.25) * base_speed * 0.5
+            self.vy = math.sin(self.anim_timer * 1.2) * base_speed * 0.6
 
-        pattern_duration = 4.0 - self.phase * 0.5
+        pattern_duration = 4.8 - self.phase * 0.4
         if self.pattern_timer >= pattern_duration:
             self.pattern_timer = 0
             self.attack_pattern = (self.attack_pattern + 1) % 4
@@ -205,21 +218,27 @@ class Boss:
                     targets.append((player.x, player.y))
                 if wingman and not wingman.dead:
                     targets.append((wingman.x, wingman.y))
-                if targets:
+                if targets and random.random() < 0.55:
                     self.charge_target = random.choice(targets)
                     self.charging = True
-                    self.charge_speed = 100
+                    self.charge_speed = 80
+                else:
+                    self.charging = False
+                    self.attack_pattern = (self.attack_pattern + 1) % 4
             else:
                 self.charging = False
 
-        if self.fire_timer <= 0:
+        fire_happened = False
+        if self.fire_timer <= 0 and not self.charging:
             self._fire_pattern(bullets_list, player, wingman)
-            rate = 0.9 - self.phase * 0.2
-            self.fire_timer = rate * random.uniform(0.7, 1.3)
+            fire_happened = True
+            rate = 1.05 - self.phase * 0.15
+            self.fire_timer = rate * random.uniform(0.85, 1.2)
 
-        if self.special_attack_timer <= 0 and self.phase >= 1:
-            self._special_attack(bullets_list, player, wingman)
-            self.special_attack_timer = 6.0 - self.phase * 1.0
+        if not fire_happened and self.special_attack_timer <= 0 and self.phase >= 1 and not self.charging:
+            did_special = self._special_attack(bullets_list, player, wingman)
+            if did_special:
+                self.special_attack_timer = 7.0 - self.phase * 0.8
 
     def _fire_pattern(self, bullets_list, player, wingman):
         targets = []
@@ -230,57 +249,62 @@ class Boss:
         target = targets[0] if targets else (SCREEN_WIDTH // 2, SCREEN_HEIGHT)
 
         if self.attack_pattern == 0 or self.phase == 0:
-            n = 8 + self.phase * 4
+            n = 8 + self.phase * 3
             for i in range(n):
-                angle = (i / n) * math.pi * 2 + self.anim_timer * 0.5
-                speed = 220 + self.phase * 30
+                angle = (i / n) * math.pi * 2 + self.anim_timer * 0.35
+                speed = 200 + self.phase * 25
                 b = Bullet(self.x, self.y,
                            math.cos(angle) * speed,
                            math.sin(angle) * speed,
-                           int(15 * self.difficulty), RED, 'enemy',
-                           radius=5, kind='enemy_big', life=5.0)
+                           int(12 * self.difficulty), RED, 'enemy',
+                           radius=5, kind='enemy_big', life=5.5)
                 bullets_list.append(b)
 
         elif self.attack_pattern == 1:
-            for tx, ty in targets:
-                for burst in range(3):
-                    angle = angle_between(self.x, self.y, tx, ty) + random.uniform(-0.2, 0.2)
-                    speed = 350 + self.phase * 50
+            for tx, ty in targets[:1]:
+                for burst in range(2):
+                    angle = angle_between(self.x, self.y, tx, ty) + random.uniform(-0.08, 0.08)
+                    speed = 320 + self.phase * 30
                     b = Bullet(self.x, self.y,
                                math.cos(angle) * speed,
                                math.sin(angle) * speed,
-                               int(20 * self.difficulty), ORANGE, 'enemy',
-                               radius=6, kind='missile', life=5.0)
+                               int(18 * self.difficulty), ORANGE, 'enemy',
+                               radius=5, kind='missile', life=5.0)
                     bullets_list.append(b)
 
         elif self.attack_pattern == 3:
             n = 5 + self.phase * 2
             for i in range(n):
                 base_angle = math.pi / 2
-                spread = 0.8
+                spread = 0.9
                 angle = base_angle + (i - n / 2) * spread / n
-                angle += math.sin(self.anim_timer * 3 + i) * 0.1
-                speed = 280
+                angle += math.sin(self.anim_timer * 2.5 + i * 0.7) * 0.08
+                speed = 260
                 b = Bullet(self.x, self.y + self.radius * 0.5,
                            math.cos(angle) * speed,
                            math.sin(angle) * speed,
-                           int(18 * self.difficulty), PURPLE, 'enemy',
-                           radius=4, kind='normal', life=5.0)
+                           int(14 * self.difficulty), PURPLE, 'enemy',
+                           radius=4, kind='normal', life=5.5)
                 bullets_list.append(b)
 
     def _special_attack(self, bullets_list, player, wingman):
+        if self._phase_lock:
+            return False
         if self.phase == 1:
             for wave in range(3):
-                n = 12 + wave * 4
+                n = 10 + wave * 3
                 for i in range(n):
-                    angle = (i / n) * math.pi * 2 + wave * 0.3
-                    speed = 200 + wave * 40
+                    angle = (i / n) * math.pi * 2 + wave * 0.22
+                    speed = 180 + wave * 35
                     b = Bullet(self.x, self.y,
                                math.cos(angle) * speed,
                                math.sin(angle) * speed,
-                               int(12 * self.difficulty), DARK_RED, 'enemy',
-                               radius=5, kind='enemy_big', life=6.0)
+                               int(10 * self.difficulty), DARK_RED, 'enemy',
+                               radius=5, kind='enemy_big', life=7.0)
                     bullets_list.append(b)
+            self._phase_lock = True
+            self._phase_lock_timer = 0.4
+            return True
         elif self.phase >= 2:
             targets = []
             if player and not player.dead:
@@ -288,16 +312,21 @@ class Boss:
             if wingman and not wingman.dead:
                 targets.append(wingman)
             for t in targets:
-                for i in range(5):
+                for i in range(4):
                     angle = angle_between(self.x, self.y, t.x, t.y)
-                    speed = 250
-                    b = Bullet(self.x + random.uniform(-30, 30),
-                               self.y + random.uniform(-30, 30),
+                    angle += random.uniform(-0.15, 0.15)
+                    speed = 230 + i * 20
+                    b = Bullet(self.x + random.uniform(-25, 25),
+                               self.y + random.uniform(-25, 25),
                                math.cos(angle) * speed,
                                math.sin(angle) * speed,
-                               int(25 * self.difficulty), PINK, 'enemy',
-                               radius=7, kind='missile', life=5.0, target=t)
+                               int(22 * self.difficulty), PINK, 'enemy',
+                               radius=7, kind='missile', life=5.5, target=t)
                     bullets_list.append(b)
+            self._phase_lock = True
+            self._phase_lock_timer = 0.5
+            return True
+        return False
 
     def draw(self, surface):
         if self.dead:

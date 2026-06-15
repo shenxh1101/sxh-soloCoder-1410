@@ -315,7 +315,7 @@ class Enemy:
             self.vx = math.sin(self.anim_timer * 0.5) * 60
 
     def _fire(self, bullets_list, target, all_targets):
-        if self.kind in [ENEMY_DRONE, ENEMY_HEAVY, ENEMY_SHIELDED, ENEMY_STEALTH]:
+        if self.kind == ENEMY_DRONE:
             if target:
                 angle = angle_between(self.x, self.y, target.x, target.y)
                 speed = 350 + self.difficulty * 30
@@ -326,37 +326,85 @@ class Enemy:
                            radius=4, kind='normal', life=4.0)
                 bullets_list.append(b)
         elif self.kind == ENEMY_HEAVY:
-            for da in [-0.15, 0, 0.15]:
+            n = self.attack_pattern % 2
+            if n == 0:
+                for da in [-0.25, -0.1, 0, 0.1, 0.25]:
+                    if target:
+                        angle = angle_between(self.x, self.y, target.x, target.y) + da
+                        speed = 260 + self.difficulty * 20
+                        b = Bullet(self.x, self.y + self.radius,
+                                   math.cos(angle) * speed,
+                                   math.sin(angle) * speed,
+                                   self.damage, DARK_RED, 'enemy',
+                                   radius=6, kind='enemy_big', life=4.5)
+                        bullets_list.append(b)
+            else:
                 if target:
-                    angle = angle_between(self.x, self.y, target.x, target.y) + da
+                    angle = angle_between(self.x, self.y, target.x, target.y)
+                    for burst in range(3):
+                        delay = burst * 0.15
+                        speed = 320 + burst * 40
+                        b = Bullet(self.x, self.y + self.radius,
+                                   math.cos(angle) * speed,
+                                   math.sin(angle) * speed,
+                                   self.damage + burst * 3, RED, 'enemy',
+                                   radius=5, kind='enemy_big', life=4.0)
+                        bullets_list.append(b)
+            self.attack_pattern += 1
+        elif self.kind == ENEMY_SHIELDED:
+            if self.shield_hp > self.max_shield * 0.3:
+                if not all_targets:
+                    all_targets = [target] if target else []
+                for ti, t in enumerate(all_targets[:2]):
+                    if t and not t.dead:
+                        base_angle = angle_between(self.x, self.y, t.x, t.y)
+                        for ring in range(2):
+                            for i in range(4):
+                                angle = base_angle + (i - 1.5) * 0.18 + ring * 0.08
+                                speed = 240 + ring * 60
+                                b = Bullet(self.x, self.y + self.radius,
+                                           math.cos(angle) * speed,
+                                           math.sin(angle) * speed,
+                                           self.damage, BLUE, 'enemy',
+                                           radius=4, kind='normal', life=4.5)
+                                bullets_list.append(b)
+            else:
+                for i in range(5):
+                    angle = angle_between(self.x, self.y, target.x, target.y) if target else math.pi / 2
+                    angle += (i - 2) * 0.22
                     speed = 300
                     b = Bullet(self.x, self.y + self.radius,
                                math.cos(angle) * speed,
                                math.sin(angle) * speed,
-                               self.damage, RED, 'enemy',
-                               radius=5, kind='normal', life=4.0)
+                               self.damage + 3, CYAN, 'enemy',
+                               radius=5, kind='enemy_big', life=4.0)
                     bullets_list.append(b)
-        elif self.kind == ENEMY_SHIELDED:
-            for i in range(3):
-                angle = angle_between(self.x, self.y, target.x, target.y) if target else math.pi / 2
-                angle += (i - 1) * 0.3
-                speed = 280
-                b = Bullet(self.x, self.y + self.radius,
-                           math.cos(angle) * speed,
-                           math.sin(angle) * speed,
-                           self.damage, BLUE, 'enemy',
-                           radius=4, kind='normal', life=4.0)
-                bullets_list.append(b)
         elif self.kind == ENEMY_STEALTH:
             if target:
-                angle = angle_between(self.x, self.y, target.x, target.y)
-                speed = 420
-                b = Bullet(self.x, self.y,
-                           math.cos(angle) * speed,
-                           math.sin(angle) * speed,
-                           self.damage, PURPLE, 'enemy',
-                           radius=3, kind='normal', life=3.0)
-                bullets_list.append(b)
+                if self.revealed or self.stealth_alpha > 150:
+                    for burst in range(2):
+                        angle = angle_between(self.x, self.y, target.x, target.y)
+                        angle += random.uniform(-0.35, 0.35)
+                        speed = 520 + random.uniform(-40, 40)
+                        b = Bullet(self.x + random.uniform(-8, 8),
+                                   self.y + random.uniform(-8, 8),
+                                   math.cos(angle) * speed,
+                                   math.sin(angle) * speed,
+                                   self.damage, PURPLE, 'enemy',
+                                   radius=3, kind='normal', life=2.5)
+                        bullets_list.append(b)
+                else:
+                    for burst in range(3):
+                        angle = angle_between(self.x, self.y, target.x, target.y)
+                        angle += random.uniform(-0.5, 0.5)
+                        speed = 380 + random.uniform(-60, 60)
+                        b = Bullet(self.x + random.uniform(-12, 12),
+                                   self.y + random.uniform(-12, 12),
+                                   math.cos(angle) * speed,
+                                   math.sin(angle) * speed,
+                                   self.damage - 3, PINK, 'enemy',
+                                   radius=2, kind='normal', life=3.5)
+                        bullets_list.append(b)
         elif self.kind == ENEMY_TURRET:
             for i in range(4):
                 angle = self.turret_angle + (i - 1.5) * 0.1

@@ -149,6 +149,21 @@ class InputManager:
                 result = result or self.is_joy_button(0, 2)
             return result
 
+    def is_shooting_released(self, player_idx=0):
+        if player_idx == 0:
+            result = (pygame.K_SPACE in self.keys_released) or (not self.mouse_buttons[0] and self.mouse_pressed[0] == False and False)
+            if pygame.K_SPACE in self.keys_released:
+                return True
+            if not self.is_mouse(0) and hasattr(self, '_prev_mouse0') and self._prev_mouse0:
+                self._prev_mouse0 = self.is_mouse(0)
+                return True
+            self._prev_mouse0 = self.is_mouse(0)
+            return False
+        else:
+            if pygame.K_RCTRL in self.keys_released or pygame.K_RETURN in self.keys_released:
+                return True
+            return False
+
     def switch_weapon(self, player_idx=0):
         if player_idx == 0:
             if self.is_key_down(pygame.K_q) or self.is_key_down(pygame.K_e):

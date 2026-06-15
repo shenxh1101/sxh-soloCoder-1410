@@ -159,11 +159,71 @@ class WeaponSystem:
                 self.overheat[i] -= OVERHEAT_COOLDOWN * dt
                 if self.overheat[i] < 0:
                     self.overheat[i] = 0
-        if self.is_charging_plasma and self.current_weapon == WEAPON_PLASMA:
-            self.plasma_charge = min(1.0, self.plasma_charge + dt * 1.2)
+        if self.current_weapon == WEAPON_PLASMA:
+            if self.is_charging_plasma and not self.overheated[WEAPON_PLASMA]:
+                self.plasma_charge = min(1.0, self.plasma_charge + dt * 1.5)
+                self.overheat[WEAPON_PLASMA] = min(OVERHEAT_MAX * 0.85,
+                                                    self.overheat[WEAPON_PLASMA] + dt * 12)
+                if self.overheat[WEAPON_PLASMA] >= OVERHEAT_MAX:
+                    self.overheat[WEAPON_PLASMA] = OVERHEAT_MAX
+                    self.overheated[WEAPON_PLASMA] = True
+                    self.is_charging_plasma = False
+                    self.plasma_charge = 0
+            elif not self.is_charging_plasma:
+                self.plasma_charge = max(0, self.plasma_charge - dt * 2.5)
         else:
-            self.plasma_charge = max(0, self.plasma_charge - dt * 2)
+            self.plasma_charge = max(0, self.plasma_charge - dt * 2.5)
+            self.is_charging_plasma = False
         self.fire_timer -= dt
+
+    def start_charge(self):
+        if self.current_weapon == WEAPON_PLASMA and not self.overheated[WEAPON_PLASMA]:
+            self.is_charging_plasma = True
+
+    def release_charge(self, x, y, bullets_list, enemies=None, is_wingman=False):
+        fired = []
+        if self.current_weapon == WEAPON_PLASMA:
+            charge = self.plasma_charge
+            self.is_charging_plasma = False
+            if charge < 0.1:
+                self.plasma_charge = 0
+                return fired
+            lvl = self.levels[WEAPON_PLASMA]
+            base_dmg = 1 if is_wingman else 1
+            self.fire_timer = 0.2 + charge * 0.4
+            self._add_heat(8 + int(charge * 35), WEAPON_PLASMA)
+            self.plasma_charge = 0
+            speed = 520 + charge * 200
+            dmg_mult = 0.5 + charge * 1.8
+            dmg = int((30 + lvl * 22) * dmg_mult) * base_dmg
+            radius = int(5 + lvl * 3 + charge * 16)
+            count = 1
+            if lvl >= 3:
+                count = 3 if charge > 0.8 else (2 if charge > 0.5 else 1)
+            elif lvl >= 2:
+                count = 2 if charge > 0.7 else 1
+            if count == 1:
+                b = Bullet(x, y - 20, 0, -speed, dmg,
+                           (255, 80 + int(charge * 175), 255), 'player',
+                           radius=radius, kind='plasma', life=3.0)
+                b.plasma_charge_level = charge
+                bullets_list.append(b)
+                fired.append(b)
+            else:
+                offsets = [-14, 0, 14] if count == 3 else [-10, 10]
+                for ox in offsets:
+                    b = Bullet(x + ox, y - 20, ox * 6, -speed, dmg,
+                               (255, 80 + int(charge * 175), 255), 'player',
+                               radius=radius, kind='plasma', life=3.0)
+                    b.plasma_charge_level = charge
+                    bullets_list.append(b)
+                    fired.append(b)
+        return fired
+
+    def get_charge_ratio(self):
+        if self.current_weapon == WEAPON_PLASMA:
+            return self.plasma_charge
+        return 0
 
     def _add_heat(self, amount, idx=None):
         if idx is None:

@@ -1,5 +1,6 @@
 import math
 import random
+import time
 import pygame
 from config import *
 from utils import *
@@ -34,6 +35,10 @@ class WaveManager:
         self.spawn_queue = []
         self.current_spawn_interval = 1.5
         self.combo_samples = []
+        self._kill_times = []
+        self._realtime_adjust_timer = 0
+        self._current_perf_estimate = 1.0
+        self.base_spawn_interval = 1.5
 
     def reset(self):
         self.wave = 0
@@ -54,7 +59,11 @@ class WaveManager:
         self.state = 'preparing'
         self.state_timer = 2.0
         self.spawn_queue = []
+        self.current_spawn_interval = 1.5
         self.combo_samples = []
+        self._kill_times = []
+        self._realtime_adjust_timer = 0
+        self._current_perf_estimate = 1.0
 
     def start_next_wave(self):
         self.wave += 1
@@ -77,7 +86,9 @@ class WaveManager:
             self.wave_total = self._calculate_wave_size()
             self.enemies_in_wave = self.wave_total
             self._build_spawn_queue()
-            self.current_spawn_interval = max(0.5, 1.5 - self.wave * 0.03)
+            self.base_spawn_interval = max(0.55, 1.55 - self.wave * 0.028)
+            self.current_spawn_interval = self.base_spawn_interval
+            self._current_perf_estimate = self.player_performance
             self.state = 'spawning'
             self.state_timer = 0
 
@@ -195,7 +206,44 @@ class WaveManager:
             return 0
         return sum(self.combo_samples) / len(self.combo_samples)
 
-    def update(self, dt, enemies_list, particles=None):
+    def register_kill(self):
+        now = pygame.time.get_ticks() / 1000.0 if pygame.get_init() else time.time()
+        self._kill_times.append(now)
+        cutoff = now - 10.0
+        self._kill_times = [t for t in self._kill_times if t > cutoff]
+
+    def _realtime_adjust_difficulty(self, dt, player_hp_ratio, current_combo):
+        self._realtime_adjust_timer -= dt
+        if self._realtime_adjust_timer > 0:
+            return
+        self._realtime_adjust_timer = 2.0
+
+        now = pygame.time.get_ticks() / 1000.0 if pygame.get_init() else time.time()
+        kill_rate = len(self._kill_times) / max(1.0, 10.0)
+        avg_combo = self.get_avg_combo()
+
+        kill_score = clamp(kill_rate / 2.0, 0, 1.2)
+        combo_score = clamp((avg_combo + current_combo * 0.3) / 15.0, 0, 1.3)
+        hp_score = clamp((player_hp_ratio - 0.3) / 0.7, -0.5, 1.0)
+        damage_penalty = -0.1 if self.damage_taken > 50 else 0
+        self.damage_taken = max(0, self.damage_taken - 5)
+
+        perf_delta = (kill_score * 0.35 + combo_score * 0.35 + hp_score * 0.2 + damage_penalty) * 0.08
+        self._current_perf_estimate = clamp(
+            self._current_perf_estimate + perf_delta,
+            0.65, 1.55
+        )
+
+        new_interval = self.base_spawn_interval / self._current_perf_estimate
+        self.current_spawn_interval = clamp(new_interval, 0.25, 3.5)
+
+        if self.state == 'spawning':
+            self.difficulty = self.base_difficulty * (
+                0.85 + self._current_perf_estimate * 0.4
+            )
+
+    def update(self, dt, enemies_list, particles=None,
+               player_hp_ratio=1.0, current_combo=0):
         self.spawn_timer -= dt
         self.state_timer -= dt
 
@@ -213,12 +261,14 @@ class WaveManager:
                 self.state = 'wave_clear'
                 self.state_timer = 3.0
         elif self.state == 'spawning':
+            self._realtime_adjust_difficulty(dt, player_hp_ratio, current_combo)
             if self.spawn_timer <= 0 and self.wave_spawned < self.wave_total:
                 self._spawn_next(enemies_list, particles)
-                self.spawn_timer = self.current_spawn_interval * random.uniform(0.7, 1.3)
+                self.spawn_timer = self.current_spawn_interval * random.uniform(0.75, 1.25)
             if self.wave_spawned >= self.wave_total:
                 self.state = 'clearing'
         elif self.state == 'clearing':
+            self._realtime_adjust_difficulty(dt, player_hp_ratio, current_combo)
             alive = sum(1 for e in enemies_list if not e.dead)
             if alive == 0:
                 self.state = 'wave_clear'
@@ -227,13 +277,6 @@ class WaveManager:
             if self.state_timer <= 0:
                 self.state = 'preparing'
                 self.state_timer = 1.5
-
-        if self.boss:
-            self.boss.update(dt, self._get_bullet_list_hack(), enemies_list,
-                            None, None, particles)
-
-    def _get_bullet_list_hack(self):
-        return []
 
     def _spawn_next(self, enemies_list, particles):
         if not self.spawn_queue:

@@ -167,6 +167,17 @@ class ProceduralAudio:
             ], duration=0.3) for _ in range(2)
         ]
 
+        self.sounds['plasma_fire'] = [
+            self._generate_complex_sound([
+                {'type': 'sine', 'freq': 80, 'freq_end': 700, 'vol': 0.3,
+                 'attack': 0.005, 'decay': 0.2, 'sustain': 0.3, 'release': 0.25},
+                {'type': 'sawtooth', 'freq': 50, 'freq_end': 400, 'vol': 0.18,
+                 'attack': 0.005, 'decay': 0.25, 'sustain': 0.25, 'release': 0.15},
+                {'type': 'square', 'freq': 150, 'freq_end': 50, 'vol': 0.1,
+                 'attack': 0, 'decay': 0.2, 'sustain': 0, 'release': 0.1}
+            ], duration=0.55) for _ in range(2)
+        ]
+
         self.sounds['explosion_small'] = [
             self._generate_complex_sound([
                 {'type': 'noise', 'freq': 1, 'vol': 0.3,

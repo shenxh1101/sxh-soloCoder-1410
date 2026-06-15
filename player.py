@@ -128,12 +128,27 @@ class Ship:
             if self.shield > self.max_shield:
                 self.shield = self.max_shield
 
+    def start_plasma_charge(self):
+        if self.dead:
+            return
+        self.weapons.start_charge()
+
+    def release_plasma_charge(self, bullets_list, enemies=None):
+        if self.dead:
+            return []
+        w = self.weapons.current_weapon
+        if w == WEAPON_PLASMA:
+            fired = self.weapons.release_charge(self.x, self.y, bullets_list,
+                                                enemies=enemies, is_wingman=self.is_wingman)
+            return fired
+        return []
+
     def try_fire(self, bullets_list, enemies=None):
         if self.dead:
             return []
         w = self.weapons.current_weapon
         if w == WEAPON_PLASMA:
-            self.weapons.start_plasma_charge()
+            return []
         return self.weapons.fire(self.x, self.y, bullets_list, enemies=enemies,
                                  is_wingman=self.is_wingman)
 
@@ -238,9 +253,31 @@ class Ship:
                                  (x + r * sx - 3, y - r * 0.7, 6, r * 0.3))
         elif w == WEAPON_PLASMA:
             charge = self.weapons.plasma_charge
-            cr = int(r * 0.25 + charge * r * 0.5)
-            pygame.draw.circle(surface, wc, (x, y - r * 0.7), cr + 3)
-            pygame.draw.circle(surface, WHITE, (x, y - r * 0.7), max(1, cr - 1))
+            charging = self.weapons.is_charging_plasma
+            cr = int(r * 0.22 + charge * r * 0.55)
+            cx, cy = x, int(y - r * 0.75)
+            if charging and charge > 0:
+                pulses = 3
+                for pi in range(pulses):
+                    phase = (pi / pulses + pygame.time.get_ticks() * 0.003) % 1.0
+                    al = int(120 * (1.0 - phase) * min(1.0, charge * 2))
+                    pr = int(cr + 6 + phase * (12 + charge * 18))
+                    pulse_surf = pygame.Surface((pr * 2, pr * 2), pygame.SRCALPHA)
+                    pygame.draw.circle(pulse_surf, (255, 100, 255, al), (pr, pr), pr, 2 + int(charge * 2))
+                    surface.blit(pulse_surf, (cx - pr, cy - pr))
+                if charge > 0.4:
+                    for _ in range(3):
+                        ax = cx + random.uniform(-cr - 4, cr + 4)
+                        ay = cy + random.uniform(-cr - 4, cr + 4)
+                        a_color = (255, random.randint(80, 220), 255)
+                        pygame.draw.circle(surface, a_color, (int(ax), int(ay)), 1 + int(charge * 2))
+            cc1 = (255, int(80 + charge * 175), 255)
+            cc2 = (255, int(180 + charge * 75), 255)
+            if charge < 0.15:
+                cc1 = (160, 80, 160)
+            pygame.draw.circle(surface, cc1, (cx, cy), cr + 4)
+            pygame.draw.circle(surface, cc2, (cx, cy), max(1, cr))
+            pygame.draw.circle(surface, WHITE, (cx, cy), max(1, int(cr * 0.55)))
 
     def _draw_flash(self, surface):
         x, y = int(self.x), int(self.y)
