@@ -80,6 +80,11 @@ class Game:
 
         self._dodge_bullet_history = {}
 
+        self._replay_explosions = []
+        self._replay_hits = []
+        self._playing_explosions = []
+        self._playing_hits = []
+
         self._init_ui()
 
     def _init_ui(self):
@@ -167,6 +172,8 @@ class Game:
         self.score_saved = False
         self.is_new_highscore = False
         self._dodge_bullet_history.clear()
+        self._replay_explosions.clear()
+        self._replay_hits.clear()
 
         self.game_start_time = pygame.time.get_ticks()
         self._change_state(GameState.PLAYING)
@@ -200,6 +207,9 @@ class Game:
 
     def _on_play_replay(self, filepath):
         if self.replay_player.load(filepath, self.recorder):
+            self._playing_explosions.clear()
+            self._playing_hits.clear()
+            self.screen_shake = 0
             self._change_state(GameState.REPLAY_PLAYING)
 
     def _on_delete_replay(self, filename):
@@ -295,22 +305,34 @@ class Game:
         star_speed = 1.0
         if self.slowmo_timer > 0:
             star_speed = 3.0
-        self.starfield.update(actual_dt, star_speed)
+        try:
+            self.starfield.update(actual_dt, star_speed)
+        except Exception:
+            pass
 
-        dx1, dy1 = self.input.get_player_movement(0)
-        shoot1 = self.input.is_shooting(0)
+        dx1, dy1 = 0, 0
+        shoot1 = False
         shoot1_released = False
+        sw1 = 0
+        try:
+            dx1, dy1 = self.input.get_player_movement(0)
+            shoot1 = self.input.is_shooting(0)
+            sw1 = self.input.switch_weapon(0)
+        except Exception:
+            dx1, dy1, shoot1, sw1 = 0, 0, False, 0
         if hasattr(self.input, 'is_shooting_released'):
             try:
                 shoot1_released = self.input.is_shooting_released(0)
             except Exception:
                 shoot1_released = False
-        sw1 = self.input.switch_weapon(0)
 
         prev_weapon1 = self.player.weapons.current_weapon
         prev_heat1 = self.player.weapons.overheated[prev_weapon1]
 
-        self.player.update(actual_dt, dx1, dy1, shoot1, sw1, self.particles)
+        try:
+            self.player.update(actual_dt, dx1, dy1, shoot1, sw1, self.particles)
+        except Exception:
+            pass
 
         weapon_now1 = self.player.weapons.current_weapon
         try:
@@ -347,9 +369,12 @@ class Game:
         except Exception as _e:
             pass
 
-        if not prev_heat1 and self.player.weapons.overheated[weapon_now1]:
-            self.audio.play('overheat')
-            self.particles.emit(self.player.x, self.player.y, 20, 120, 0.4, 2, [GRAY, DARK_GRAY])
+        try:
+            if not prev_heat1 and self.player.weapons.overheated[weapon_now1]:
+                self.audio.play('overheat')
+                self.particles.emit(self.player.x, self.player.y, 20, 120, 0.4, 2, [GRAY, DARK_GRAY])
+        except Exception:
+            pass
 
         wingman_fired = False
         if self.wingman and not self.wingman.dead:
@@ -448,7 +473,10 @@ class Game:
         except Exception:
             self.powerups = []
 
-        self.particles.update(actual_dt)
+        try:
+            self.particles.update(actual_dt)
+        except Exception:
+            pass
 
         try:
             self._update_combo_tracking()
@@ -461,92 +489,139 @@ class Game:
         except Exception:
             pass
 
-        if self.screen_shake > 0:
-            self.screen_shake = max(0, self.screen_shake - actual_dt * 40)
+        try:
+            if self.screen_shake > 0:
+                self.screen_shake = max(0, self.screen_shake - actual_dt * 40)
+        except Exception:
+            pass
 
-        self._detect_dodges()
+        try:
+            self._detect_dodges()
+        except Exception:
+            pass
 
-        if self.wave_mgr.check_game_over(self.player, self.wingman):
-            self._on_game_over()
+        try:
+            if self.wave_mgr.check_game_over(self.player, self.wingman):
+                self._on_game_over()
+        except Exception:
+            pass
 
-        frame_data = {
-            't': pygame.time.get_ticks(),
-            'score': self.score,
-            'wave': self.wave_mgr.wave,
-            'wave_state': self.wave_mgr.state,
-            'p': {'x': self.player.x, 'y': self.player.y, 'hp': self.player.hp,
-                  'shield': self.player.shield, 'weapon': self.player.weapons.current_weapon,
-                  'combo': self.player.combo, 'charge': self.player.weapons.get_charge_ratio(),
-                  'overheat': self.player.weapons.get_heat_ratio()},
-        }
-        if self.wingman:
-            frame_data['w'] = {'x': self.wingman.x, 'y': self.wingman.y,
-                               'hp': self.wingman.hp, 'dead': self.wingman.dead,
-                               'weapon': self.wingman.weapons.current_weapon,
-                               'charge': self.wingman.weapons.get_charge_ratio()}
-
-        e_data = []
-        for e in self.enemies[:200]:
-            if not e.dead:
-                e_data.append({
-                    'x': e.x, 'y': e.y, 'k': e.kind, 'r': e.radius,
-                    'hp': e.hp / max(1, e.max_hp),
-                    'shield': e.shield_hp / max(1, e.max_shield) if e.max_shield > 0 else 0,
-                    'alpha': getattr(e, 'stealth_alpha', 255),
-                    'color': list(e.color) if hasattr(e, 'color') and isinstance(e.color, (list, tuple)) else None,
-                })
-        frame_data['enemies'] = e_data
-
-        b_data = []
-        for b in self.bullets[:800]:
-            if not b.dead:
-                owner_tag = 0 if b.owner == 'player' else 1
-                kind_tag = 0
-                if b.kind == 'plasma':
-                    kind_tag = 1
-                elif b.kind == 'missile':
-                    kind_tag = 2
-                elif b.kind == 'laser':
-                    kind_tag = 3
-                elif b.kind == 'enemy_big':
-                    kind_tag = 4
-                b_data.append({
-                    'x': b.x, 'y': b.y, 'r': b.radius, 'o': owner_tag,
-                    'k': kind_tag, 'col': list(b.color) if isinstance(b.color, tuple) else [255, 255, 255],
-                    'ch': getattr(b, 'plasma_charge_level', 0),
-                })
-        frame_data['bullets'] = b_data
-
-        pu_data = []
-        for p in self.powerups:
-            if not p.dead:
-                pu_data.append({'x': p.x, 'y': p.y, 'k': p.kind, 'c': list(p.color)})
-        frame_data['powerups'] = pu_data
-
-        if boss and not boss.dead:
-            frame_data['boss'] = {
-                'x': boss.x, 'y': boss.y, 'r': boss.radius,
-                'hp': boss.hp / max(1, boss.max_hp),
-                'phase': boss.phase, 'rage': boss.rage_mode,
-                'shake': boss.shake_intensity,
-                'weak': [{'e': boss.weak_point_exposed[i],
-                          'd': boss.weak_points[i]['destroyed'],
-                          'hp': boss.weak_points[i]['hp'] / max(1, boss.weak_points[i]['max_hp']),
-                          'x': boss.x + math.cos(boss.weak_points[i]['angle']) * boss.weak_points[i]['offset'],
-                          'y': boss.y + math.sin(boss.weak_points[i]['angle']) * boss.weak_points[i]['offset']}
-                         for i in range(3)]
+        try:
+            frame_data = {
+                't': pygame.time.get_ticks(),
+                'score': self.score,
+                'wave': self.wave_mgr.wave,
+                'wave_state': self.wave_mgr.state,
+                'p': {'x': self.player.x, 'y': self.player.y, 'hp': self.player.hp,
+                      'shield': self.player.shield, 'weapon': self.player.weapons.current_weapon,
+                      'combo': self.player.combo, 'charge': self.player.weapons.get_charge_ratio(),
+                      'overheat': self.player.weapons.get_heat_ratio()},
             }
-        else:
-            frame_data['boss'] = None
+            if self.wingman:
+                frame_data['w'] = {'x': self.wingman.x, 'y': self.wingman.y,
+                                   'hp': self.wingman.hp, 'dead': self.wingman.dead,
+                                   'weapon': self.wingman.weapons.current_weapon,
+                                   'charge': self.wingman.weapons.get_charge_ratio()}
 
-        frame_data['boss_info'] = {
-            'phase': boss.phase if boss and not boss.dead else -1,
-            'rage': boss.rage_mode if boss and not boss.dead else False,
-        }
+            e_data = []
+            for e in self.enemies[:200]:
+                if not e.dead:
+                    try:
+                        e_data.append({
+                            'x': e.x, 'y': e.y, 'k': e.kind, 'r': e.radius,
+                            'hp': e.hp / max(1, e.max_hp),
+                            'shield': e.shield_hp / max(1, e.max_shield) if e.max_shield > 0 else 0,
+                            'alpha': getattr(e, 'stealth_alpha', 255),
+                            'color': list(e.color) if hasattr(e, 'color') and isinstance(e.color, (list, tuple)) else None,
+                        })
+                    except Exception:
+                        continue
+            frame_data['enemies'] = e_data
 
-        frame_data['fx_shake'] = self.screen_shake
-        frame_data['fx_slowmo'] = max(0.0, self.slowmo_timer)
-        self.recorder.record_frame(frame_data)
+            b_data = []
+            for b in self.bullets[:800]:
+                if not b.dead:
+                    try:
+                        owner_tag = 0 if b.owner == 'player' else 1
+                        kind_tag = 0
+                        if b.kind == 'plasma':
+                            kind_tag = 1
+                        elif b.kind == 'missile':
+                            kind_tag = 2
+                        elif b.kind == 'laser':
+                            kind_tag = 3
+                        elif b.kind == 'enemy_big':
+                            kind_tag = 4
+                        b_data.append({
+                            'x': b.x, 'y': b.y, 'r': b.radius, 'o': owner_tag,
+                            'k': kind_tag, 'col': list(b.color) if isinstance(b.color, tuple) else [255, 255, 255],
+                            'ch': getattr(b, 'plasma_charge_level', 0),
+                        })
+                    except Exception:
+                        continue
+            frame_data['bullets'] = b_data
+
+            pu_data = []
+            for p in self.powerups:
+                if not p.dead:
+                    try:
+                        pu_data.append({'x': p.x, 'y': p.y, 'k': p.kind, 'c': list(p.color)})
+                    except Exception:
+                        continue
+            frame_data['powerups'] = pu_data
+
+            if boss and not boss.dead:
+                try:
+                    frame_data['boss'] = {
+                        'x': boss.x, 'y': boss.y, 'r': boss.radius,
+                        'hp': boss.hp / max(1, boss.max_hp),
+                        'phase': boss.phase, 'rage': boss.rage_mode,
+                        'shake': boss.shake_intensity,
+                        'weak': [{'e': boss.weak_point_exposed[i],
+                                  'd': boss.weak_points[i]['destroyed'],
+                                  'hp': boss.weak_points[i]['hp'] / max(1, boss.weak_points[i]['max_hp']),
+                                  'x': boss.x + math.cos(boss.weak_points[i]['angle']) * boss.weak_points[i]['offset'],
+                                  'y': boss.y + math.sin(boss.weak_points[i]['angle']) * boss.weak_points[i]['offset']}
+                                 for i in range(3)]
+                    }
+                except Exception:
+                    frame_data['boss'] = None
+            else:
+                frame_data['boss'] = None
+
+            try:
+                frame_data['boss_info'] = {
+                    'phase': boss.phase if boss and not boss.dead else -1,
+                    'rage': boss.rage_mode if boss and not boss.dead else False,
+                }
+            except Exception:
+                frame_data['boss_info'] = {'phase': -1, 'rage': False}
+
+            frame_data['fx_shake'] = self.screen_shake
+            frame_data['fx_slowmo'] = max(0.0, self.slowmo_timer)
+
+            if hasattr(self, '_replay_explosions') and self._replay_explosions:
+                frame_data['explosions'] = list(self._replay_explosions)
+                self._replay_explosions.clear()
+            else:
+                frame_data['explosions'] = []
+
+            if hasattr(self, '_replay_hits') and self._replay_hits:
+                frame_data['hits'] = list(self._replay_hits)
+                self._replay_hits.clear()
+            else:
+                frame_data['hits'] = []
+        except Exception:
+            frame_data = {'t': pygame.time.get_ticks(), 'score': self.score, 'wave': 1,
+                          'wave_state': '', 'p': {'x': SCREEN_WIDTH//2, 'y': SCREEN_HEIGHT-100,
+                          'hp': 100, 'shield': 0, 'weapon': 0, 'combo': 0, 'charge': 0, 'overheat': 0},
+                          'enemies': [], 'bullets': [], 'powerups': [], 'boss': None,
+                          'boss_info': {'phase': -1, 'rage': False},
+                          'fx_shake': 0, 'fx_slowmo': 0, 'explosions': [], 'hits': []}
+        try:
+            self.recorder.record_frame(frame_data)
+        except Exception:
+            pass
 
     def _handle_collisions(self):
         hit_rects = [self.player.get_hitbox_rect()]
@@ -566,8 +641,15 @@ class Game:
                     if circle_collide(b.x, b.y, b.radius, e.x, e.y, e.radius):
                         sc, hit = e.take_damage(b.damage)
                         if hit:
-                            self.particles.hit(b.x, b.y, e.color if hasattr(e, 'color') else WHITE)
+                            hc = e.color if hasattr(e, 'color') else WHITE
+                            self.particles.hit(b.x, b.y, hc)
                             self.audio.play('hit')
+                            try:
+                                self._replay_hits.append({
+                                    'x': b.x, 'y': b.y, 'c': list(hc) if isinstance(hc, tuple) else [255, 255, 255], 's': 1
+                                })
+                            except Exception:
+                                pass
                         if e.dead:
                             self._on_enemy_killed(e, sc)
                         b.dead = True
@@ -582,7 +664,15 @@ class Game:
                                                [YELLOW, ORANGE, WHITE], friction=0.9)
                             self.audio.play('hit')
                         if hit:
-                            self.particles.hit(b.x, b.y, YELLOW if wp >= 0 else GRAY)
+                            hc2 = YELLOW if wp >= 0 else GRAY
+                            self.particles.hit(b.x, b.y, hc2)
+                            try:
+                                self._replay_hits.append({
+                                    'x': b.x, 'y': b.y,
+                                    'c': list(hc2), 's': 3 if wp >= 0 else 1
+                                })
+                            except Exception:
+                                pass
                         if boss.dead:
                             self._on_boss_killed(boss, sc)
                         b.dead = True
@@ -596,6 +686,12 @@ class Game:
                             self.audio.play('player_hit')
                             self.screen_shake = max(self.screen_shake, 10)
                             self.particles.hit(b.x, b.y, RED)
+                            try:
+                                self._replay_hits.append({
+                                    'x': b.x, 'y': b.y, 'c': list(RED), 's': 2
+                                })
+                            except Exception:
+                                pass
                             self.wave_mgr.register_damage(b.damage)
                         b.dead = True
                         break
@@ -646,11 +742,21 @@ class Game:
     def _on_enemy_killed(self, enemy, score_val):
         if not score_val:
             score_val = enemy.score_value
+        big = enemy.radius >= 25
         self.particles.explosion(enemy.x, enemy.y,
                                  count=40 if enemy.radius < 20 else 70,
                                  size=4 if enemy.radius < 20 else 6)
-        self.audio.play_explosion(big=enemy.radius >= 25)
+        self.audio.play_explosion(big=big)
         self.screen_shake = max(self.screen_shake, 5 if enemy.radius < 20 else 10)
+
+        try:
+            self._replay_explosions.append({
+                'x': enemy.x, 'y': enemy.y,
+                'size': 2 if enemy.radius < 25 else 3,
+                't': 0,
+            })
+        except Exception:
+            pass
 
         try:
             self.wave_mgr.register_kill()
@@ -676,10 +782,24 @@ class Game:
             self._maybe_drop_upgrade(enemy.x, enemy.y)
 
     def _on_boss_killed(self, boss, score_val):
-        for _ in range(12):
+        for i in range(12):
             ox = random.uniform(-boss.radius, boss.radius)
             oy = random.uniform(-boss.radius, boss.radius)
             self.particles.big_explosion(boss.x + ox, boss.y + oy)
+            try:
+                self._replay_explosions.append({
+                    'x': boss.x + ox, 'y': boss.y + oy,
+                    'size': 4 if i < 4 else 3,
+                    't': 0,
+                })
+            except Exception:
+                pass
+        try:
+            self._replay_explosions.append({
+                'x': boss.x, 'y': boss.y, 'size': 5, 't': 0,
+            })
+        except Exception:
+            pass
         self.audio.play('boss_defeated')
         self.screen_shake = 30
         self.score += score_val
@@ -788,6 +908,46 @@ class Game:
         self.score = frame.get('score', 0)
         self.starfield.update(dt)
         self.particles.update(dt)
+
+        try:
+            self.screen_shake = frame.get('fx_shake', 0)
+        except Exception:
+            self.screen_shake = 0
+
+        try:
+            for ex in frame.get('explosions', []):
+                self._playing_explosions.append({
+                    'x': ex['x'], 'y': ex['y'],
+                    'size': ex.get('size', 2),
+                    'life': 0.5, 'max': 0.5,
+                })
+        except Exception:
+            pass
+
+        try:
+            for ht in frame.get('hits', []):
+                self._playing_hits.append({
+                    'x': ht['x'], 'y': ht['y'],
+                    'c': ht.get('c', [255, 255, 255]),
+                    's': ht.get('s', 1),
+                    'life': 0.18, 'max': 0.18,
+                })
+        except Exception:
+            pass
+
+        try:
+            for e in self._playing_explosions:
+                e['life'] -= dt
+            self._playing_explosions = [e for e in self._playing_explosions if e['life'] > 0]
+        except Exception:
+            self._playing_explosions = []
+
+        try:
+            for h in self._playing_hits:
+                h['life'] -= dt
+            self._playing_hits = [h for h in self._playing_hits if h['life'] > 0]
+        except Exception:
+            self._playing_hits = []
 
     def _draw(self):
         self.screen.fill(BLACK)
@@ -1107,6 +1267,38 @@ class Game:
                 pygame.draw.circle(vig, (0, 50, 100, a),
                                    (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2), rad, 30)
             self.screen.blit(vig, (0, 0))
+
+        try:
+            for ex in self._playing_explosions:
+                t = ex['life'] / max(0.01, ex['max'])
+                alpha = int(255 * t)
+                sz = ex.get('size', 2)
+                r0 = int(8 * sz + (1.0 - t) * 30 * sz)
+                r1 = int(5 * sz + (1.0 - t) * 18 * sz)
+                es = pygame.Surface((r0 * 2 + 10, r0 * 2 + 10), pygame.SRCALPHA)
+                cx, cy = r0 + 5, r0 + 5
+                pygame.draw.circle(es, (255, 180, 60, alpha), (cx, cy), r0)
+                pygame.draw.circle(es, (255, 240, 180, int(alpha * 0.9)), (cx, cy), r1)
+                pygame.draw.circle(es, (255, 255, 255, int(alpha * 0.6)), (cx, cy), max(1, r1 // 2))
+                self.screen.blit(es, (int(ex['x']) - r0 - 5, int(ex['y']) - r0 - 5))
+        except Exception:
+            pass
+
+        try:
+            for ht in self._playing_hits:
+                t = ht['life'] / max(0.01, ht['max'])
+                alpha = int(255 * t)
+                cs = ht.get('c', [255, 255, 255])
+                s = ht.get('s', 1)
+                r = int(4 + (1.0 - t) * 10 * s)
+                hs = pygame.Surface((r * 2 + 6, r * 2 + 6), pygame.SRCALPHA)
+                pygame.draw.circle(hs, (int(cs[0]), int(cs[1]), int(cs[2]), alpha),
+                                   (r + 3, r + 3), r)
+                pygame.draw.circle(hs, (255, 255, 255, int(alpha * 0.9)),
+                                   (r + 3, r + 3), max(1, r // 2))
+                self.screen.blit(hs, (int(ht['x']) - r - 3, int(ht['y']) - r - 3))
+        except Exception:
+            pass
 
         draw_text(self.screen, f"SCORE: {frame.get('score', 0):,}",
                   SCREEN_WIDTH // 2, SCREEN_HEIGHT - 80, 24, WHITE, center=True)

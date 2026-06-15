@@ -162,8 +162,8 @@ class WeaponSystem:
         if self.current_weapon == WEAPON_PLASMA:
             if self.is_charging_plasma and not self.overheated[WEAPON_PLASMA]:
                 self.plasma_charge = min(1.0, self.plasma_charge + dt * 1.5)
-                self.overheat[WEAPON_PLASMA] = min(OVERHEAT_MAX * 0.85,
-                                                    self.overheat[WEAPON_PLASMA] + dt * 12)
+                self.overheat[WEAPON_PLASMA] = min(OVERHEAT_MAX,
+                                                    self.overheat[WEAPON_PLASMA] + dt * 18)
                 if self.overheat[WEAPON_PLASMA] >= OVERHEAT_MAX:
                     self.overheat[WEAPON_PLASMA] = OVERHEAT_MAX
                     self.overheated[WEAPON_PLASMA] = True

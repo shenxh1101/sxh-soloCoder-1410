@@ -109,6 +109,12 @@ class Boss:
     def _on_phase_change(self):
         self.attack_pattern = 0
         self.phase_timer = 0
+        self.pattern_timer = 0
+        self.fire_timer = 0.4
+        self.special_attack_timer = 3.0
+        self.charging = False
+        self._phase_lock = False
+        self._phase_lock_timer = 0.5
         self.rage_mode = self.phase >= 2
         for i in range(3):
             self.weak_point_exposed[i] = True
@@ -198,7 +204,7 @@ class Boss:
                         self.charging = False
                         if particles:
                             particles.explosion(self.x, self.y, count=80, size=6)
-                        self.screen_shake = 20
+                        self.shake_intensity = 20
                 else:
                     self.charging = False
             else:
