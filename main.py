@@ -782,21 +782,37 @@ class Game:
             self._maybe_drop_upgrade(enemy.x, enemy.y)
 
     def _on_boss_killed(self, boss, score_val):
-        for i in range(12):
-            ox = random.uniform(-boss.radius, boss.radius)
-            oy = random.uniform(-boss.radius, boss.radius)
+        for i in range(20):
+            angle = (i / 20) * math.pi * 2 + random.uniform(-0.2, 0.2)
+            dist = random.uniform(boss.radius * 0.2, boss.radius * 0.9)
+            ox = math.cos(angle) * dist
+            oy = math.sin(angle) * dist
             self.particles.big_explosion(boss.x + ox, boss.y + oy)
             try:
                 self._replay_explosions.append({
                     'x': boss.x + ox, 'y': boss.y + oy,
-                    'size': 4 if i < 4 else 3,
+                    'size': 5 if i % 4 == 0 else (4 if i % 3 == 0 else 3),
+                    't': 0,
+                })
+            except Exception:
+                pass
+        for i in range(8):
+            ox = random.uniform(-boss.radius * 0.5, boss.radius * 0.5)
+            oy = random.uniform(-boss.radius * 0.5, boss.radius * 0.5)
+            try:
+                self._replay_explosions.append({
+                    'x': boss.x + ox, 'y': boss.y + oy,
+                    'size': 6,
                     't': 0,
                 })
             except Exception:
                 pass
         try:
             self._replay_explosions.append({
-                'x': boss.x, 'y': boss.y, 'size': 5, 't': 0,
+                'x': boss.x, 'y': boss.y, 'size': 8, 't': 0,
+            })
+            self._replay_explosions.append({
+                'x': boss.x, 'y': boss.y, 'size': 10, 't': 0,
             })
         except Exception:
             pass
@@ -916,10 +932,12 @@ class Game:
 
         try:
             for ex in frame.get('explosions', []):
+                sz = ex.get('size', 2)
+                life = 0.6 if sz < 5 else (1.0 if sz < 8 else 1.3)
                 self._playing_explosions.append({
                     'x': ex['x'], 'y': ex['y'],
-                    'size': ex.get('size', 2),
-                    'life': 0.5, 'max': 0.5,
+                    'size': sz,
+                    'life': life, 'max': life,
                 })
         except Exception:
             pass
@@ -1271,16 +1289,25 @@ class Game:
         try:
             for ex in self._playing_explosions:
                 t = ex['life'] / max(0.01, ex['max'])
-                alpha = int(255 * t)
+                alpha = int(255 * max(0, t))
                 sz = ex.get('size', 2)
-                r0 = int(8 * sz + (1.0 - t) * 30 * sz)
-                r1 = int(5 * sz + (1.0 - t) * 18 * sz)
-                es = pygame.Surface((r0 * 2 + 10, r0 * 2 + 10), pygame.SRCALPHA)
-                cx, cy = r0 + 5, r0 + 5
-                pygame.draw.circle(es, (255, 180, 60, alpha), (cx, cy), r0)
-                pygame.draw.circle(es, (255, 240, 180, int(alpha * 0.9)), (cx, cy), r1)
-                pygame.draw.circle(es, (255, 255, 255, int(alpha * 0.6)), (cx, cy), max(1, r1 // 2))
-                self.screen.blit(es, (int(ex['x']) - r0 - 5, int(ex['y']) - r0 - 5))
+                r0 = int(8 * sz + (1.0 - t) * 35 * sz)
+                r1 = int(5 * sz + (1.0 - t) * 22 * sz)
+                r2 = int(3 * sz + (1.0 - t) * 12 * sz)
+                es = pygame.Surface((r0 * 2 + 20, r0 * 2 + 20), pygame.SRCALPHA)
+                cx, cy = r0 + 10, r0 + 10
+                if sz >= 5:
+                    pygame.draw.circle(es, (255, 100, 30, int(alpha * 0.5)), (cx, cy), r0 + 8)
+                    pygame.draw.circle(es, (255, 180, 60, int(alpha * 0.7)), (cx, cy), r0)
+                    pygame.draw.circle(es, (255, 240, 180, int(alpha * 0.9)), (cx, cy), r1)
+                    pygame.draw.circle(es, (255, 255, 255, int(alpha * 0.8)), (cx, cy), r2)
+                    if t > 0.5:
+                        pygame.draw.circle(es, (255, 255, 200, int(alpha * 0.4)), (cx, cy), r2 // 2)
+                else:
+                    pygame.draw.circle(es, (255, 180, 60, alpha), (cx, cy), r0)
+                    pygame.draw.circle(es, (255, 240, 180, int(alpha * 0.9)), (cx, cy), r1)
+                    pygame.draw.circle(es, (255, 255, 255, int(alpha * 0.6)), (cx, cy), max(1, r2))
+                self.screen.blit(es, (int(ex['x']) - r0 - 10, int(ex['y']) - r0 - 10))
         except Exception:
             pass
 

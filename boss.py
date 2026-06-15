@@ -67,22 +67,26 @@ class Boss:
                 self.y + math.sin(wp['angle']) * wp['offset'])
 
     def take_damage(self, amount, hit_x, hit_y):
+        if self.dead:
+            return 0, False, -1
         actual_damage = amount
         hit_weak = -1
         for i in range(3):
             if self.weak_point_exposed[i] and not self.weak_points[i]['destroyed']:
                 wx, wy = self.get_weak_point_pos(i)
-                if distance(hit_x, hit_y, wx, wy) < 25:
+                if distance(hit_x, hit_y, wx, wy) < 32:
                     self.weak_points[i]['hp'] -= amount * 3
                     hit_weak = i
                     actual_damage = amount * 3
                     if self.weak_points[i]['hp'] <= 0:
                         self.weak_points[i]['destroyed'] = True
                         self.damage_multiplier = 1.5 + i * 0.25
+                        all_destroyed = True
                         for w2 in self.weak_points:
                             if not w2['destroyed']:
+                                all_destroyed = False
                                 break
-                        else:
+                        if all_destroyed:
                             self.core_shield = False
                             self.damage_multiplier = 2.5
                     break
@@ -93,12 +97,17 @@ class Boss:
                 actual_damage = int(actual_damage * self.damage_multiplier)
 
         self.hp -= actual_damage
-        self.shake_intensity = 6 if hit_weak >= 0 else 3
+        self.shake_intensity = max(self.shake_intensity, 8 if hit_weak >= 0 else 4)
 
-        for i in range(BOSS_PHASES - 1, -1, -1):
-            if self.hp <= self.phase_thresholds[i] and self.phase <= i:
-                self.phase = i + 1
+        try:
+            old_phase = self.phase
+            for i in range(len(self.phase_thresholds) - 1, -1, -1):
+                if self.hp <= self.phase_thresholds[i] and self.phase <= i:
+                    self.phase = i + 1
+            if self.phase != old_phase:
                 self._on_phase_change()
+        except Exception:
+            pass
 
         if self.hp <= 0:
             self.hp = 0
@@ -110,16 +119,25 @@ class Boss:
         self.attack_pattern = 0
         self.phase_timer = 0
         self.pattern_timer = 0
-        self.fire_timer = 0.4
-        self.special_attack_timer = 3.0
+        self.fire_timer = 0.25
+        self.special_attack_timer = 2.5 + self.phase
         self.charging = False
         self._phase_lock = False
-        self._phase_lock_timer = 0.5
+        self._phase_lock_timer = 0.35
         self.rage_mode = self.phase >= 2
+        n_exposed = 1 + self.phase
+        candidates = [i for i in range(3) if not self.weak_points[i]['destroyed']]
         for i in range(3):
-            self.weak_point_exposed[i] = True
-        self.weak_point_timer = 5.0
-        self.shake_intensity = 15
+            self.weak_point_exposed[i] = False
+        if candidates:
+            import random as rnd
+            rnd.shuffle(candidates)
+            for i in candidates[:n_exposed]:
+                self.weak_point_exposed[i] = True
+        self.weak_point_timer = 4.0 + random.uniform(0, 1.0)
+        if self.phase >= 2:
+            self.weak_point_timer *= 0.75
+        self.shake_intensity = max(self.shake_intensity, 18)
 
     def update(self, dt, bullets_list, enemies_list, player, wingman=None, particles=None):
         if self.dead:
