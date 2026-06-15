@@ -189,20 +189,115 @@ class ReplayPlayer:
         self.playing = False
         self.speed = 1.0
         self.paused = False
+        self._speed_levels = [0.25, 0.5, 1.0, 2.0, 4.0]
+        self._speed_idx = 2
+        self._accumulator = 0.0
+        self.key_frames = {}
 
     def load(self, filepath, recorder):
         self.metadata, self.frames = recorder.load(filepath)
         self.frame_idx = 0
+        self.speed = 1.0
+        self._speed_idx = 2
+        self.paused = False
+        self._accumulator = 0.0
+        self.key_frames = self._find_key_frames()
         return self.metadata is not None and len(self.frames) > 0
+
+    def _find_key_frames(self):
+        kf = {'boss_appear': -1, 'phase_change': {}, 'boss_defeat': -1, 'game_over': -1}
+        prev_boss = None
+        prev_phase = -1
+        for i, f in enumerate(self.frames):
+            try:
+                b = f.get('boss')
+                bi = f.get('boss_info', {})
+                ph = bi.get('phase', -1) if bi else -1
+                if prev_boss is None and b is not None and kf['boss_appear'] < 0:
+                    kf['boss_appear'] = i
+                if prev_phase != -1 and ph > prev_phase and ph not in kf['phase_change']:
+                    kf['phase_change'][ph] = i
+                if prev_boss is not None and b is None and kf['boss_defeat'] < 0:
+                    kf['boss_defeat'] = max(0, i - 1)
+                if b is not None:
+                    prev_boss = b
+                if ph >= 0:
+                    prev_phase = ph
+            except Exception:
+                continue
+        return kf
 
     def reset(self):
         self.frame_idx = 0
+        self._accumulator = 0.0
 
-    def next_frame(self):
+    def toggle_pause(self):
+        self.paused = not self.paused
+        return self.paused
+
+    def cycle_speed(self):
+        self._speed_idx = (self._speed_idx + 1) % len(self._speed_levels)
+        self.speed = self._speed_levels[self._speed_idx]
+        return self.speed
+
+    def get_speed_label(self):
+        return f"{self.speed:.2f}x"
+
+    def seek(self, target_idx):
+        if not self.frames:
+            return False
+        self.frame_idx = int(max(0, min(target_idx, len(self.frames) - 1)))
+        self._accumulator = 0.0
+        return True
+
+    def seek_percent(self, pct):
+        if not self.frames:
+            return False
+        return self.seek(int(pct * (len(self.frames) - 1)))
+
+    def seek_key_frame(self, key):
+        idx = -1
+        if key == 'boss_appear':
+            idx = self.key_frames.get('boss_appear', -1)
+        elif key == 'boss_defeat':
+            idx = self.key_frames.get('boss_defeat', -1)
+        elif key == 'start':
+            idx = 0
+        elif key == 'end':
+            idx = len(self.frames) - 1 if self.frames else -1
+        if idx >= 0:
+            return self.seek(idx)
+        return False
+
+    def seek_phase(self, phase_num):
+        idx = self.key_frames.get('phase_change', {}).get(phase_num, -1)
+        if idx >= 0:
+            return self.seek(idx)
+        return False
+
+    def step_frame(self, steps=1):
+        if not self.frames:
+            return None
+        self.frame_idx = max(0, min(self.frame_idx + steps, len(self.frames) - 1))
+        if self.frame_idx < len(self.frames):
+            return self.frames[self.frame_idx]
+        return None
+
+    def next_frame(self, dt=1.0 / 60):
         if not self.frames or self.frame_idx >= len(self.frames):
             return None
-        frame = self.frames[self.frame_idx]
-        self.frame_idx += 1
+        if self.paused:
+            if self.frame_idx < len(self.frames):
+                return self.frames[self.frame_idx]
+            return None
+        self._accumulator += dt * 60 * self.speed
+        frame = None
+        while self._accumulator >= 1.0 and self.frame_idx < len(self.frames):
+            frame = self.frames[self.frame_idx]
+            self.frame_idx += 1
+            self._accumulator -= 1.0
+        if frame is None and self.frame_idx < len(self.frames):
+            frame = self.frames[self.frame_idx]
         return frame
 
     def has_more(self):
@@ -211,4 +306,17 @@ class ReplayPlayer:
     def get_progress(self):
         if not self.frames:
             return 0
-        return self.frame_idx / len(self.frames)
+        return self.frame_idx / max(1, len(self.frames))
+
+    def get_time_str(self):
+        if not self.frames:
+            return "00:00 / 00:00"
+        try:
+            total_frames = len(self.frames)
+            t_cur = self.frame_idx / 60.0
+            t_total = total_frames / 60.0
+            m_cur, s_cur = int(t_cur // 60), int(t_cur % 60)
+            m_tot, s_tot = int(t_total // 60), int(t_total % 60)
+            return f"{m_cur:02d}:{s_cur:02d} / {m_tot:02d}:{s_tot:02d}"
+        except Exception:
+            return "00:00 / 00:00"

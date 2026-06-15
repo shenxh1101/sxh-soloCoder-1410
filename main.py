@@ -33,6 +33,8 @@ class GameState:
     CUSTOMIZE = 6
     REPLAYS = 7
     REPLAY_PLAYING = 8
+    BOSS_SUMMARY = 9
+    BOSS_REWARD = 10
 
 
 class Game:
@@ -84,6 +86,9 @@ class Game:
         self._replay_hits = []
         self._playing_explosions = []
         self._playing_hits = []
+
+        self.boss_stats = None
+        self.boss_reward_data = None
 
         self._init_ui()
 
@@ -174,6 +179,9 @@ class Game:
         self._dodge_bullet_history.clear()
         self._replay_explosions.clear()
         self._replay_hits.clear()
+
+        self.boss_stats = None
+        self.boss_reward_data = None
 
         self.game_start_time = pygame.time.get_ticks()
         self._change_state(GameState.PLAYING)
@@ -268,9 +276,48 @@ class Game:
         elif self.state == GameState.REPLAYS:
             self.replay_screen.handle_event(event, self.replays_list)
         elif self.state == GameState.REPLAY_PLAYING:
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                self._change_state(GameState.REPLAYS)
-                self.replays_list = self.recorder.list_replays()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self._change_state(GameState.REPLAYS)
+                    self.replays_list = self.recorder.list_replays()
+                elif event.key == pygame.K_SPACE:
+                    self.replay_player.toggle_pause()
+                elif event.key == pygame.K_TAB:
+                    self.replay_player.cycle_speed()
+                elif event.key == pygame.K_LEFT:
+                    self.replay_player.step_frame(-10)
+                elif event.key == pygame.K_RIGHT:
+                    self.replay_player.step_frame(10)
+                elif event.key == pygame.K_HOME:
+                    self.replay_player.seek_key_frame('start')
+                elif event.key == pygame.K_END:
+                    self.replay_player.seek_key_frame('end')
+                elif event.key == pygame.K_F1:
+                    self.replay_player.seek_key_frame('boss_appear')
+                elif event.key == pygame.K_F2:
+                    self.replay_player.seek_phase(1)
+                elif event.key == pygame.K_F3:
+                    self.replay_player.seek_phase(2)
+                elif event.key == pygame.K_F4:
+                    self.replay_player.seek_key_frame('boss_defeat')
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
+                if 100 <= my <= 145 and 100 <= mx <= SCREEN_WIDTH - 100:
+                    pct = (mx - 100) / max(1, SCREEN_WIDTH - 200)
+                    self.replay_player.seek_percent(clamp(pct, 0, 1))
+        elif self.state == GameState.BOSS_REWARD:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+                    if self.boss_reward_data and self.boss_reward_data['stage'] >= 4:
+                        self._change_state(GameState.BOSS_SUMMARY)
+                elif event.key == pygame.K_ESCAPE:
+                    self._change_state(GameState.BOSS_SUMMARY)
+        elif self.state == GameState.BOSS_SUMMARY:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN or event.key == pygame.K_SPACE or event.key == pygame.K_ESCAPE:
+                    self.boss_stats = None
+                    self.boss_reward_data = None
+                    self._change_state(GameState.PLAYING)
 
     def _update(self):
         if self.state == GameState.MENU:
@@ -295,8 +342,33 @@ class Game:
             self.replay_screen.update(self.input.get_mouse_pos(), self.replays_list)
         elif self.state == GameState.REPLAY_PLAYING:
             self._update_replay(self.dt)
+        elif self.state == GameState.BOSS_REWARD:
+            self._update_boss_reward(self.dt)
+        elif self.state == GameState.BOSS_SUMMARY:
+            self._update_boss_summary(self.dt)
 
     def _update_game(self, dt):
+        try:
+            if self.wave_mgr.state == 'boss_fight' and self.boss_stats is None:
+                self.boss_stats = {
+                    'start_time': pygame.time.get_ticks(),
+                    'end_time': 0,
+                    'total_damage': 0,
+                    'weapon_damage': [0, 0, 0, 0],
+                    'weapon_fire_count': [0, 0, 0, 0],
+                    'weak_hit_count': 0,
+                    'weak_destroy_count': [0, 0, 0],
+                    'weak_destroyed_before': [False, False, False],
+                    'player_hit_count': 0,
+                    'boss_max_hp': 0,
+                }
+                if self.wave_mgr.boss:
+                    self.boss_stats['boss_max_hp'] = self.wave_mgr.boss.max_hp
+                    for i in range(3):
+                        self.boss_stats['weak_destroyed_before'][i] = self.wave_mgr.boss.weak_points[i]['destroyed']
+        except Exception:
+            pass
+
         actual_dt = dt
         if self.slowmo_timer > 0:
             actual_dt = dt * 0.25
@@ -673,6 +745,20 @@ class Game:
                                 })
                             except Exception:
                                 pass
+                            try:
+                                if self.boss_stats is not None:
+                                    wt = getattr(b, 'weapon_type', 0)
+                                    self.boss_stats['total_damage'] += int(b.damage)
+                                    if 0 <= wt < 4:
+                                        self.boss_stats['weapon_damage'][wt] += int(b.damage)
+                                        self.boss_stats['weapon_fire_count'][wt] += 1
+                                    if wp >= 0:
+                                        self.boss_stats['weak_hit_count'] += 1
+                                        if 0 <= wp < 3 and not self.boss_stats['weak_destroyed_before'][wp] and boss.weak_points[wp]['destroyed']:
+                                            self.boss_stats['weak_destroy_count'][wp] = 1
+                                            self.boss_stats['weak_destroyed_before'][wp] = True
+                            except Exception:
+                                pass
                         if boss.dead:
                             self._on_boss_killed(boss, sc)
                         b.dead = True
@@ -693,6 +779,11 @@ class Game:
                             except Exception:
                                 pass
                             self.wave_mgr.register_damage(b.damage)
+                            try:
+                                if self.boss_stats is not None and self.wave_mgr.state == 'boss_fight':
+                                    self.boss_stats['player_hit_count'] += 1
+                            except Exception:
+                                pass
                         b.dead = True
                         break
 
@@ -818,10 +909,29 @@ class Game:
             pass
         self.audio.play('boss_defeated')
         self.screen_shake = 30
-        self.score += score_val
-        self.player.score += score_val
+
+        boss_final_score = boss.score_value
+        self.score += boss_final_score
+        self.player.score += boss_final_score
         self.player.combo += 20
         self.player.add_score(0)
+
+        wave_time = (pygame.time.get_ticks() - self.wave_mgr.wave_start_time) / 1000
+        if self.boss_stats is not None:
+            self.boss_stats['end_time'] = pygame.time.get_ticks()
+            self.boss_stats['duration'] = (self.boss_stats['end_time'] - self.boss_stats['start_time']) / 1000.0
+            self.boss_stats['final_score'] = boss_final_score
+
+        self.boss_reward_data = {
+            'score': boss_final_score,
+            'heal': 40,
+            'weapon_upgrades': 4,
+            'drops': 3,
+            'wave': self.wave_mgr.wave,
+            'elapsed': wave_time,
+            'timer': 0,
+            'stage': 0,
+        }
 
         for wi in range(4):
             self.player.weapons.upgrade_weapon(wi)
@@ -837,13 +947,14 @@ class Game:
             ry = boss.y + random.uniform(-40, 40)
             self._maybe_drop_upgrade(rx, ry, force_drop=True)
 
-        wave_time = (pygame.time.get_ticks() - self.wave_mgr.wave_start_time) / 1000
         self.wave_mgr.update_performance(
             self.player.hp / self.player.max_hp,
             self.max_combo,
             self.player.combo,
             wave_time
         )
+
+        self._change_state(GameState.BOSS_REWARD)
 
     def _maybe_drop_upgrade(self, x, y, force_drop=False):
         if force_drop or random.random() < 0.6:
@@ -997,6 +1108,12 @@ class Game:
             self.replay_screen.draw(self.screen, self.replays_list)
         elif self.state == GameState.REPLAY_PLAYING:
             self._draw_replay()
+        elif self.state == GameState.BOSS_REWARD:
+            self._draw_game(0, 0)
+            self._draw_boss_reward()
+        elif self.state == GameState.BOSS_SUMMARY:
+            self._draw_game(0, 0)
+            self._draw_boss_summary()
 
         if self.slowmo_timer > 0:
             dark = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -1060,13 +1177,53 @@ class Game:
     def _draw_replay(self):
         self.starfield.draw(self.screen)
         progress = self.replay_player.get_progress()
+        kf = self.replay_player.key_frames
         draw_text_outline(self.screen, "REPLAY PLAYBACK", SCREEN_WIDTH // 2,
-                          60, 42, PURPLE, BLACK, center=True)
-        draw_text(self.screen, "Progress: %d%%   (ESC to exit)" % int(progress * 100),
-                  SCREEN_WIDTH // 2, 110, 18, GRAY, center=True)
+                          35, 36, PURPLE, BLACK, center=True)
+        time_label = self.replay_player.get_time_str()
+        paused = self.replay_player.paused
+        speed_label = self.replay_player.get_speed_label()
+        status = "[PAUSED]  SPACE" if paused else "[PLAYING] SPACE=pause"
+        draw_text(self.screen, f"{status}   |   TAB=speed {speed_label}   |   {time_label}",
+                  SCREEN_WIDTH // 2, 70, 16, GRAY, center=True)
+
         pw = SCREEN_WIDTH - 200
-        pygame.draw.rect(self.screen, DARK_GRAY, (100, 130, pw, 8), border_radius=4)
-        pygame.draw.rect(self.screen, PURPLE, (100, 130, int(pw * progress), 8), border_radius=4)
+        pygame.draw.rect(self.screen, DARK_GRAY, (100, 100, pw, 14), border_radius=4)
+        try:
+            if kf.get('boss_appear', -1) >= 0 and self.replay_player.frames:
+                xp = 100 + int(pw * (kf['boss_appear'] / max(1, len(self.replay_player.frames) - 1)))
+                pygame.draw.line(self.screen, CYAN, (xp, 95), (xp, 119), 2)
+            for ph_num, ph_idx in kf.get('phase_change', {}).items():
+                if self.replay_player.frames and ph_idx >= 0:
+                    xp = 100 + int(pw * (ph_idx / max(1, len(self.replay_player.frames) - 1)))
+                    pygame.draw.line(self.screen, ORANGE, (xp, 95), (xp, 119), 2)
+            if kf.get('boss_defeat', -1) >= 0 and self.replay_player.frames:
+                xp = 100 + int(pw * (kf['boss_defeat'] / max(1, len(self.replay_player.frames) - 1)))
+                pygame.draw.line(self.screen, YELLOW, (xp, 95), (xp, 119), 3)
+        except Exception:
+            pass
+        pygame.draw.rect(self.screen, PURPLE, (100, 100, int(pw * progress), 14), border_radius=4)
+        try:
+            cpx = 100 + int(pw * progress)
+            pygame.draw.circle(self.screen, WHITE, (cpx, 107), 7)
+        except Exception:
+            pass
+
+        draw_text(self.screen,
+                  "F1=Boss Appear   F2=Phase 1   F3=Phase 2   F4=Boss Defeat   Home=Start   End=End   ←/→=±10 frames   Click bar=seek",
+                  SCREEN_WIDTH // 2, 135, 14, (180, 180, 180), center=True)
+        if kf.get('boss_appear', -1) >= 0:
+            draw_text(self.screen, "Boss", 100 + int(pw * (kf['boss_appear'] / max(1, len(self.replay_player.frames) - 1))), 86, 12, CYAN, center=True)
+        if kf.get('boss_defeat', -1) >= 0:
+            draw_text(self.screen, "Defeat", 100 + int(pw * (kf['boss_defeat'] / max(1, len(self.replay_player.frames) - 1))), 86, 12, YELLOW, center=True)
+        try:
+            for ph_num, ph_idx in kf.get('phase_change', {}).items():
+                if ph_idx >= 0 and self.replay_player.frames:
+                    draw_text(self.screen, f"P{ph_num+1}",
+                              100 + int(pw * (ph_idx / max(1, len(self.replay_player.frames) - 1))),
+                              86, 12, ORANGE, center=True)
+        except Exception:
+            pass
 
         fid = max(0, min(self.replay_player.frame_idx - 1, len(self.replay_player.frames) - 1))
         frame = self.replay_player.frames[fid] if self.replay_player.frames else None
@@ -1391,6 +1548,174 @@ class Game:
             pygame.draw.rect(surface, WHITE,
                              (x - r * 0.2, y - r * 0.6, r * 0.4, r * 0.5),
                              border_radius=3)
+
+    def _update_boss_reward(self, dt):
+        if not self.boss_reward_data:
+            self._change_state(GameState.BOSS_SUMMARY)
+            return
+        self.boss_reward_data['timer'] += dt
+        try:
+            self.particles.update(dt)
+        except Exception:
+            pass
+        try:
+            self.starfield.update(dt, 1.5)
+        except Exception:
+            pass
+        if self.screen_shake > 0:
+            self.screen_shake = max(0, self.screen_shake - dt * 30)
+        stages_delay = [0.3, 1.0, 1.8, 2.6, 3.5]
+        t = self.boss_reward_data['timer']
+        for i in range(len(stages_delay)):
+            if t >= stages_delay[i] and self.boss_reward_data['stage'] < i + 1:
+                self.boss_reward_data['stage'] = i + 1
+                if i == 0:
+                    try:
+                        self.audio.play('upgrade')
+                    except Exception:
+                        pass
+                elif i >= 4:
+                    pass
+
+    def _draw_boss_reward(self):
+        if not self.boss_reward_data:
+            return
+        rd = self.boss_reward_data
+        t = rd['timer']
+        stage = rd['stage']
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        pygame.draw.rect(overlay, (0, 0, 0, 160), (0, 0, SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.screen.blit(overlay, (0, 0))
+
+        cx = SCREEN_WIDTH // 2
+        cy = 180
+        title_color = YELLOW if t > 0.5 else WHITE
+        draw_text_outline(self.screen, "★ BOSS DEFEATED ★", cx, cy,
+                          56 if stage >= 1 else 40, title_color, BLACK, center=True)
+
+        wave_label = f"WAVE {rd['wave']} CLEAR"
+        draw_text(self.screen, wave_label, cx, cy + 65, 24, CYAN, center=True)
+
+        duration_str = f"Battle Time: {rd['elapsed']:.1f}s"
+        draw_text(self.screen, duration_str, cx, cy + 100, 18, (200, 200, 200), center=True)
+
+        items_y = cy + 165
+        if stage >= 1:
+            items = [
+                ("+{} SCORE".format(rd['score']), YELLOW, 0),
+                ("+{} HP HEAL".format(rd['heal']), GREEN, 1),
+                ("+4 WEAPON UPGRADES", CYAN, 2),
+                ("+{} DROPS".format(rd['drops']), ORANGE, 3),
+            ]
+            for label, color, idx in items:
+                if stage >= idx + 1:
+                    yy = items_y + idx * 42
+                    alpha = min(1.0, (t - (0.3 + idx * 0.6)) / 0.3)
+                    if alpha > 0:
+                        s = pygame.Surface((400, 36), pygame.SRCALPHA)
+                        a = int(220 * alpha)
+                        pygame.draw.rect(s, (40, 40, 70, a), (0, 0, 400, 36), border_radius=8)
+                        pygame.draw.rect(s, (*color[:3], int(180 * alpha)), (0, 0, 400, 36), 2, border_radius=8)
+                        self.screen.blit(s, (cx - 200, yy - 18))
+                        draw_text(self.screen, label, cx, yy, 22, (*color[:3], int(255 * alpha)) if isinstance(color, tuple) and len(color) >= 3 else color, center=True)
+
+        if stage >= 4:
+            hint_y = SCREEN_HEIGHT - 100
+            draw_text(self.screen, "PRESS [ENTER / SPACE] TO VIEW SUMMARY",
+                      cx, hint_y, 20, WHITE, center=True)
+            draw_text(self.screen, "NEXT WAVE WILL START AUTOMATICALLY",
+                      cx, hint_y + 30, 14, GRAY, center=True)
+
+    def _update_boss_summary(self, dt):
+        try:
+            self.particles.update(dt)
+        except Exception:
+            pass
+        try:
+            self.starfield.update(dt, 1.2)
+        except Exception:
+            pass
+
+    def _draw_boss_summary(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        pygame.draw.rect(overlay, (0, 0, 0, 190), (0, 0, SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.screen.blit(overlay, (0, 0))
+
+        cx = SCREEN_WIDTH // 2
+        draw_text_outline(self.screen, "COMBAT ANALYSIS", cx, 70, 40, ORANGE, BLACK, center=True)
+
+        stats = self.boss_stats if self.boss_stats else {}
+        if not stats:
+            draw_text(self.screen, "No battle data available", cx, 200, 24, GRAY, center=True)
+            return
+
+        duration = stats.get('duration', 0)
+        total_dmg = stats.get('total_damage', 0)
+        weak_hits = stats.get('weak_hit_count', 0)
+        weak_destroyed = sum(stats.get('weak_destroy_count', [0, 0, 0]))
+        player_hits = stats.get('player_hit_count', 0)
+        boss_max_hp = stats.get('boss_max_hp', 1)
+        dmg_ratio = min(1.0, total_dmg / max(1, boss_max_hp))
+
+        left_col = 220
+        right_col = SCREEN_WIDTH - 220
+        header_y = 140
+        row_h = 38
+
+        labels_data = [
+            ("Battle Duration", f"{duration:.1f}s", CYAN),
+            ("Total Damage", f"{total_dmg:,}", YELLOW),
+            ("% of Max HP", f"{dmg_ratio * 100:.1f}%", GREEN),
+            ("Weak Point Hits", f"{weak_hits}", ORANGE),
+            ("Weak Points Destroyed", f"{weak_destroyed} / 3", PINK),
+            ("Player Hits Taken", f"{player_hits}", RED),
+        ]
+
+        for i, (label, val, col) in enumerate(labels_data):
+            yy = header_y + i * row_h
+            if i < 3:
+                xx = left_col
+            else:
+                xx = right_col
+                yy = header_y + (i - 3) * row_h
+            draw_text(self.screen, label, xx, yy, 18, (180, 180, 180))
+            draw_text(self.screen, val, xx, yy + 22, 24, col)
+
+        wpn_y = header_y + 4 * row_h
+        draw_text_outline(self.screen, "WEAPON DAMAGE BREAKDOWN", cx, wpn_y - 10, 22, PURPLE, BLACK, center=True)
+
+        wpn_names = ["LASER", "SPREAD", "MISSILE", "PLASMA"]
+        wpn_colors = [CYAN, YELLOW, ORANGE, PURPLE]
+        wpn_dmg = stats.get('weapon_damage', [0, 0, 0, 0])
+        wpn_fire = stats.get('weapon_fire_count', [0, 0, 0, 0])
+        total_wpn = sum(wpn_dmg)
+
+        bar_x = 200
+        bar_w = SCREEN_WIDTH - 400
+        bar_h = 22
+        for i in range(4):
+            yy = wpn_y + 20 + i * 45
+            ratio = wpn_dmg[i] / max(1, total_wpn) if total_wpn > 0 else 0
+            draw_text(self.screen, wpn_names[i], bar_x, yy + 10, 16, wpn_colors[i])
+            bar_start_x = bar_x + 110
+            bw = bar_w - 110
+            pygame.draw.rect(self.screen, DARK_GRAY, (bar_start_x, yy, bw, bar_h), border_radius=4)
+            fill_w = int(bw * ratio)
+            pygame.draw.rect(self.screen, wpn_colors[i], (bar_start_x, yy, fill_w, bar_h), border_radius=4)
+            dmg_label = f"{wpn_dmg[i]:,} dmg  ({wpn_fire[i]} hits)  {ratio * 100:.0f}%"
+            draw_text(self.screen, dmg_label, bar_start_x + bw // 2, yy + 12, 14, WHITE, center=True)
+
+        grade = "S" if dmg_ratio > 0.95 and player_hits <= 3 and weak_destroyed >= 3 else (
+                "A" if dmg_ratio > 0.8 and player_hits <= 6 else (
+                "B" if dmg_ratio > 0.6 else (
+                "C" if dmg_ratio > 0.4 else "D")))
+        grade_colors = {"S": PINK, "A": YELLOW, "B": GREEN, "C": CYAN, "D": GRAY}
+        draw_text_outline(self.screen, f"GRADE: {grade}", cx, wpn_y + 220,
+                          72, grade_colors.get(grade, WHITE), BLACK, center=True)
+
+        hint_y = SCREEN_HEIGHT - 60
+        draw_text(self.screen, "PRESS [ENTER / SPACE / ESC] TO CONTINUE TO NEXT WAVE",
+                  cx, hint_y, 18, WHITE, center=True)
 
 
 def main():

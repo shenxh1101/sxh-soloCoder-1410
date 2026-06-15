@@ -6,7 +6,7 @@ from utils import *
 
 
 class Bullet:
-    def __init__(self, x, y, vx, vy, damage, color, owner, radius=4, kind='normal', life=3.0, target=None):
+    def __init__(self, x, y, vx, vy, damage, color, owner, radius=4, kind='normal', life=3.0, target=None, weapon_type=0):
         self.x = x
         self.y = y
         self.vx = vx
@@ -22,6 +22,8 @@ class Bullet:
         self.dead = False
         self.trail_timer = 0
         self.angle = math.atan2(vy, vx)
+        self.weapon_type = weapon_type
+        self.plasma_charge_level = 0
 
     def update(self, dt, particles=None, enemies=None, player=None):
         if self.kind == 'missile' and self.target is not None and not getattr(self.target, 'dead', True):
@@ -205,7 +207,7 @@ class WeaponSystem:
             if count == 1:
                 b = Bullet(x, y - 20, 0, -speed, dmg,
                            (255, 80 + int(charge * 175), 255), 'player',
-                           radius=radius, kind='plasma', life=3.0)
+                           radius=radius, kind='plasma', life=3.0, weapon_type=WEAPON_PLASMA)
                 b.plasma_charge_level = charge
                 bullets_list.append(b)
                 fired.append(b)
@@ -214,7 +216,7 @@ class WeaponSystem:
                 for ox in offsets:
                     b = Bullet(x + ox, y - 20, ox * 6, -speed, dmg,
                                (255, 80 + int(charge * 175), 255), 'player',
-                               radius=radius, kind='plasma', life=3.0)
+                               radius=radius, kind='plasma', life=3.0, weapon_type=WEAPON_PLASMA)
                     b.plasma_charge_level = charge
                     bullets_list.append(b)
                     fired.append(b)
@@ -263,7 +265,7 @@ class WeaponSystem:
                 positions = [x - spacing, x, x + spacing]
             for px in positions:
                 b = Bullet(px, y - 15, 0, -speed, dmg, CYAN, 'player',
-                           radius=3 + lvl, kind='laser', life=2.0)
+                           radius=3 + lvl, kind='laser', life=2.0, weapon_type=WEAPON_LASER)
                 bullets_list.append(b)
                 fired.append(b)
 
@@ -280,7 +282,7 @@ class WeaponSystem:
                 vx = math.cos(angle) * speed
                 vy = math.sin(angle) * speed
                 b = Bullet(x, y - 10, vx, vy, dmg, YELLOW, 'player',
-                           radius=3, kind='normal', life=1.2)
+                           radius=3, kind='normal', life=1.2, weapon_type=WEAPON_SPREAD)
                 bullets_list.append(b)
                 fired.append(b)
 
@@ -315,7 +317,7 @@ class WeaponSystem:
                            math.cos(angle) * speed,
                            math.sin(angle) * speed,
                            dmg, ORANGE, 'player',
-                           radius=5, kind='missile', life=4.0, target=target)
+                           radius=5, kind='missile', life=4.0, target=target, weapon_type=WEAPON_MISSILE)
                 bullets_list.append(b)
                 fired.append(b)
 
@@ -331,13 +333,15 @@ class WeaponSystem:
             count = lvl if lvl > 1 else 1
             if count == 1:
                 b = Bullet(x, y - 20, 0, -speed, dmg, PURPLE, 'player',
-                           radius=radius, kind='plasma', life=2.5)
+                           radius=radius, kind='plasma', life=2.5, weapon_type=WEAPON_PLASMA)
+                b.plasma_charge_level = charge
                 bullets_list.append(b)
                 fired.append(b)
             else:
                 for dx in [-12, 12] if count == 2 else [-20, 0, 20]:
                     b = Bullet(x + dx, y - 20, dx * 5, -speed, dmg, PURPLE, 'player',
-                               radius=radius, kind='plasma', life=2.5)
+                               radius=radius, kind='plasma', life=2.5, weapon_type=WEAPON_PLASMA)
+                    b.plasma_charge_level = charge
                     bullets_list.append(b)
                     fired.append(b)
 
